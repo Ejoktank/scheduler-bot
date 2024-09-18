@@ -3,13 +3,18 @@ import { Telegraf } from 'telegraf'
 import { callbackQuery, message } from 'telegraf/filters'
 
 type TelegramId = number | string;
-type DialogState = string;
+type DialogMode = string;
 
-const DIALOG_STATES: DialogState[] = [
+const DIALOG_STATES: DialogMode[] = [
     "SELECT_DAY",
+    "SELECT_TIME",
     "WRITE_NOTIFICATION_MESSAGE",
-    "SELECT_TIME"
 ];
+
+interface DialogState {
+    mode: DialogMode,
+    time: number
+}
 
 function main() {
 
@@ -21,31 +26,88 @@ function main() {
         ctx.reply("Здарова!");
     });
 
-    bot.on(callbackQuery('data'), async (ctx) => {
-        await ctx.answerCbQuery();
+    bot.command('schedule', (ctx) => {
+        dialogState.set(ctx.from.id, { mode: DIALOG_STATES[0], time: 0} );
+        ctx.reply('На когда создать sms сообщение', {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: 'Сегодня', callback_data: 'schedule_today' }],
+                    [{ text: 'Завтра', callback_data: 'schedule_tomorrow' }],
+                    [{ text: 'Когда-нибдуь', callback_data: 'schedule_one_day' }],
+                ]
+            }
+        })
+    });
 
-        const payload = ctx.callbackQuery.data
-        if (payload === 'one') {
-            ctx.reply("Ты нажал на 1");
+    bot.on(callbackQuery('data'), async (ctx) => {
+
+        if (!dialogState.has(ctx.from.id)) {
+            return;
         }
-        if (payload === 'two') {
-            ctx.reply("Ты нажал на 2");
+
+        const mode = dialogState.get(ctx.from.id)?.mode;
+
+        if (mode === DIALOG_STATES[0]) {
+            await ctx.answerCbQuery();
+
+            const payload = ctx.callbackQuery.data
+
+            if (payload === 'schedule_today') {
+                ctx.reply("1", {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: "30 секунд", callback_data: "seconds_30" }],
+                            [{ text: "15 минут", callback_data: "minutes_15" }],
+                            [{ text: "30 минут", callback_data: "minutes_30" }],
+                            [{ text: "Задать время", callback_data: "set_time" }],
+                        ]
+                    }
+                });
+                dialogState.set(ctx.from.id, {
+                    mode: DIALOG_STATES[1],
+                    time: 0
+                });
+            }
+            if (payload === 'schedule_tomorrow') {
+                ctx.reply("2");
+                dialogState.delete(ctx.from.id);
+            }
+            if (payload === 'schedule_one_day') {
+                ctx.reply("3");
+                dialogState.delete(ctx.from.id);
+            }
         }
-        if (payload === 'three') {
-            ctx.reply("Ты нажал на 3");
+        if (mode == DIALOG_STATES[1]) {
+            await ctx.answerCbQuery();
+            const payload = ctx.callbackQuery.data
+
+            if (payload === 'seconds_30') {
+                ctx.reply("Введите сообщение");
+                dialogState.set(ctx.from.id, {
+                    mode: DIALOG_STATES[2],
+                    time: 1000 * 5
+                });
+            }
         }
     });
 
     bot.on(message('text'), async (ctx) => {
-        ctx.reply('OK', {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '1', callback_data: 'one' }],
-                    [{ text: '2', callback_data: 'two' }],
-                    [{ text: '3', callback_data: 'three' }]
-                ]
-            }
-        })
+
+        if (!dialogState.has(ctx.from.id)) {
+            return;
+        }
+
+        const item = dialogState.get(ctx.from.id)!;
+
+        if (item.mode === DIALOG_STATES[2]) {
+            const message = ctx.message.text;
+            const time = item.time;
+            
+            ctx.reply("Поставлено на счетчик")
+            setTimeout(() => {
+                ctx.reply(message);
+            }, time);
+        }
     });
 
     bot.launch(() => console.log("ONLINE!"));
