@@ -12,7 +12,7 @@ const timeMapping = {
     '3_hours': 3 * 60 * 60 * 1000,
 };
 
-const scheduledMessages = {};
+const scheduledMessages = {}; // Хранит активные напоминания
 
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -63,7 +63,7 @@ bot.on('callback_query', async (query) => {
         });
     } else if (query.data === 'set_time') {
         bot.sendMessage(chatId, 'Напишите время в формате чч:мм');
-        bot.on('message', (msg) => handleTimeSetting(msg, chatId));
+        bot.once('message', (msg) => handleTimeSetting(msg, chatId));
     } else {
         handleTimeSelection(chatId, query.data);
     }
@@ -77,8 +77,8 @@ function handleTimeSetting(msg, chatId) {
         if (!isNaN(hours) && !isNaN(minutes) && hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60) {
             const waitTime = new Date().setHours(hours, minutes, 0, 0) - Date.now();
             if (waitTime > 0) {
-                scheduleMessage(chatId, msg.chat.last_text, waitTime);
-                bot.sendMessage(chatId, `Напоминание установлено на ${hours}:${minutes}.`);
+                bot.sendMessage(chatId, 'Введите текст напоминания:');
+                bot.once('message', (msg) => scheduleMessage(chatId, msg.text, waitTime));
             } else {
                 bot.sendMessage(chatId, 'Выберите время в будущем.');
             }
@@ -94,30 +94,43 @@ function handleTimeSelection(chatId, timeFrame) {
     let waitTime;
     switch (timeFrame) {
         case 'morning':
-            waitTime = 8 * 60 * 60 * 1000; // 8:00
+            waitTime = (8 * 60 * 60 * 1000) - Date.now(); // 8:00
             break;
         case 'day':
-            waitTime = 12 * 60 * 60 * 1000; // 12:00
+            waitTime = (12 * 60 * 60 * 1000) - Date.now(); // 12:00
             break;
         case 'evening':
-            waitTime = 18 * 60 * 60 * 1000; // 18:00
+            waitTime = (18 * 60 * 60 * 1000) - Date.now(); // 18:00
             break;
         case 'before_sleep':
-            waitTime = 22 * 60 * 60 * 1000; // 22:00
+            waitTime = (22 * 60 * 60 * 1000) - Date.now(); // 22:00
             break;
         default:
             waitTime = timeMapping[timeFrame];
     }
 
-    if (waitTime) {
-        bot.sendMessage(chatId, `Напоминание установлено через ${waitTime / 60000} минут.`);
-        scheduleMessage(chatId, 'Ваше напоминание!', waitTime);
+    if (waitTime > 0) {
+        bot.sendMessage(chatId, 'Введите текст напоминания:');
+        bot.once('message', (msg) => scheduleMessage(chatId, msg.text, waitTime));
+    } else {
+        bot.sendMessage(chatId, 'Выберите время в будущем.');
     }
 }
 
 function scheduleMessage(chatId, message, waitTime) {
-    setTimeout(() => {
-        bot.sendMessage(chatId, message);
-        // Если вам нужно удалить сообщение из scheduledMessages, добавьте здесь логику
+    if (!message || message.trim() === '') {
+        console.error('Ошибка: сообщение пустое. Напоминание не установлено.');
+        return; // Не устанавливаем напоминание, если сообщение пустое
+    }
+
+    const timeoutId = setTimeout(() => {
+        bot.sendMessage(chatId, message)
+            .catch(err => console.error('Ошибка при отправке сообщения:', err));
+        delete scheduledMessages[chatId]; // Удаляем сообщение из scheduledMessages
     }, waitTime);
+
+    if (!scheduledMessages[chatId]) {
+        scheduledMessages[chatId] = [];
+    }
+    scheduledMessages[chatId].push(timeoutId); // Сохраняем ID таймера
 }
