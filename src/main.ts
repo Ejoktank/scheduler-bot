@@ -1,6 +1,7 @@
 import config from './.env.json';
 import { Telegraf } from 'telegraf'
 import { callbackQuery, message } from 'telegraf/filters'
+import { pulse } from './pulse';
 
 type TelegramId = number | string;
 type DialogMode = string;

@@ -24,6 +24,7 @@ class Pulse {
     
     private running = false
     private timeout?: NodeJS.Timeout
+    private cycleCancel?: () => void 
 
     private emitter = new EventEmitter();
 
@@ -86,6 +87,11 @@ class Pulse {
         return
     }
 
+    private restore(node:PulseNode) {
+        node.next = this.queue;
+        this.queue = node;
+    }
+
     private begin() {
         const repeatJobs:string[] = []
         for (const [name, [delay, repeat]] of this.jobs) {
@@ -113,11 +119,37 @@ class Pulse {
 
     repeat(name:string, interval:number, f:Function) {
         this.jobs.set(name, [interval, true, f])
+        if (this.running) {
+            const isOnline = this.timeout !== undefined;
+            if (isOnline) {
+                clearTimeout(this.timeout);
+                this.cycleCancel?.();
+                this.timeout = undefined;   
+                this.time = Date.now() - this.clockTime;
+            }
+            this.enqueue(0, name);
+            if (isOnline) {
+                this.cycle();
+            }
+        }
         return this;
     }
 
     do(name:string, after:number, f:Function) {
         this.jobs.set(name, [after, false, f]);
+        if (this.running) {
+            const isOnline = this.timeout !== undefined;
+            if (isOnline) {
+                clearTimeout(this.timeout);
+                this.cycleCancel?.();
+                this.timeout = undefined;
+                this.time = Date.now() - this.clockTime;
+            }
+            this.enqueue(after, name);
+            if (isOnline) {
+                this.cycle();
+            }
+        }
         return this;
     }
 
@@ -136,6 +168,7 @@ class Pulse {
             const handler = () => {
 
                 this.timeout = undefined;
+                this.cycleCancel = undefined;
                 this.time = node.time;
 
                 const jobs = node.jobs
@@ -159,6 +192,7 @@ class Pulse {
 
             if (dt > PULSE_TIMEOUT_THRESHOLD) {
                 this.timeout = setTimeout(handler, dt);
+                this.cycleCancel = () => this.restore(node);
             } else {
                 handler();
             }
