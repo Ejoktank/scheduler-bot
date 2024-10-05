@@ -1,120 +1,258 @@
 import config from './.env.json';
-import { Telegraf } from 'telegraf'
+import { Telegraf, Context } from 'telegraf'
 import { callbackQuery, message } from 'telegraf/filters'
 import { pulse } from './pulse';
-
-type TelegramId = number | string;
-type DialogMode = string;
-
-const DIALOG_STATES: DialogMode[] = [
-    "SELECT_DAY",
-    "SELECT_TIME",
-    "WRITE_NOTIFICATION_MESSAGE",
-];
-
-interface DialogState {
-    mode: DialogMode,
-    time: number
-}
+import { create, justCtx } from './dialog';
+import { telegraf } from './dialog/plugins';
+import { DateTime } from 'luxon'
 
 function main() {
 
-    const dialogState = new Map<TelegramId, DialogState>();
+    const scheduler = pulse()
+    const bot = new Telegraf(config.token)
 
-    const bot = new Telegraf(config.token);
+    const [use, start, destroy] = create<Context>()(
+        telegraf,
+        script => script.clojure(({ lines, state }) => {
 
-    bot.start((ctx) => {
-        ctx.reply("Здарова!");
-    });
+            const info = state(() => ({
+                dateTime: DateTime.now(),
+                caption: null as null | number
+            }))
 
-    bot.command('schedule', (ctx) => {
-        dialogState.set(ctx.from.id, { mode: DIALOG_STATES[0], time: 0} );
-        ctx.reply('На когда создать sms сообщение', {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: 'Сегодня', callback_data: 'schedule_today' }],
-                    [{ text: 'Завтра', callback_data: 'schedule_tomorrow' }],
-                    [{ text: 'Когда-нибдуь', callback_data: 'schedule_one_day' }],
-                ]
-            }
-        })
-    });
+            lines.line('START', e => {
+                e.tg.select('На когда создать уведомление?', (o) => {
+                    o.option('Сегодня', () => {
+                        info.value.dateTime = DateTime.now().startOf('day');
+                        e.goto('SELECT TIME TODAY')
+                    })
+                    o.option('Завтра', () => {
+                        info.value.dateTime = DateTime.now().startOf('day').plus({ day: 1 });
+                        e.goto('SELECT TIME')
+                    })
+                    o.option('Завтра или позже', () => {
+                        e.got.editMessageText('Введите дату в формате DD.MM.YYYY')
+                        e.next('ENTER DAY')
+                    })
+                })
+            })
+            lines.line('ENTER DAY', e => {
+                if (!e.got.has(message('text'))) {
+                    e.got.reply('Дата не распознана, введите другую дату')
+                    e.next('ENTER DAY')
+                    return
+                }
+                const parsed = DateTime.fromFormat(e.got.message.text, 'dd.MM.yyyy')
+                if (!parsed.isValid) {
+                    e.got.reply('Дата не распознана, введите другую дату')
+                    e.next('ENTER DAY')
+                    return
+                }
+                if (parsed.diffNow().milliseconds <= 0) {
+                    e.got.reply('Мы не можем напомнить вам в прошлом :( Попробуйте еще раз')
+                    e.next('ENTER DAY')
+                    return
+                }
+                info.value.dateTime = parsed.startOf('day')
+                e.goto('SELECT TIME')
+            })
+            lines.line('SELECT TIME TODAY', e => {
+                e.tg.select('Укажите время', o => {
+                    const today = info.value.dateTime
+                    o.option('Через минуту', () => {
+                        info.value.dateTime = DateTime.now().plus({ minutes: 1 })
+                        e.goto('ENTER CAPTION')
+                    })
+                    o.option('Через 5 минут', () => {
+                        info.value.dateTime = DateTime.now().plus({ minutes: 5 })
+                        e.goto('ENTER CAPTION')
+                    })
+                    o.option('Через час', () => {
+                        info.value.dateTime = DateTime.now().plus({ hours: 1 })
+                        e.goto('ENTER CAPTION')
+                    })
 
-    bot.on(callbackQuery('data'), async (ctx) => {
+                    const morning = today.plus({ hours: 8 })
+                    const dayDay = today.plus({ hours: 12 }) 
+                    const evening = today.plus({ hours: 18 })
+                    const beforeBad = today.plus({ hours: 23 })
 
-        if (!dialogState.has(ctx.from.id)) {
-            return;
-        }
-
-        const mode = dialogState.get(ctx.from.id)?.mode;
-
-        if (mode === DIALOG_STATES[0]) {
-            await ctx.answerCbQuery();
-
-            const payload = ctx.callbackQuery.data
-
-            if (payload === 'schedule_today') {
-                ctx.reply("1", {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: "30 секунд", callback_data: "seconds_30" }],
-                            [{ text: "15 минут", callback_data: "minutes_15" }],
-                            [{ text: "30 минут", callback_data: "minutes_30" }],
-                            [{ text: "Задать время", callback_data: "set_time" }],
-                        ]
+                    if (morning.diffNow().milliseconds > 0) {
+                        o.option('Утром (08:00)', () => {
+                            info.value.dateTime = morning
+                            e.goto('ENTER CAPTION')
+                        })
                     }
-                });
-                dialogState.set(ctx.from.id, {
-                    mode: DIALOG_STATES[1],
-                    time: 0
-                });
-            }
-            if (payload === 'schedule_tomorrow') {
-                ctx.reply("2");
-                dialogState.delete(ctx.from.id);
-            }
-            if (payload === 'schedule_one_day') {
-                ctx.reply("3");
-                dialogState.delete(ctx.from.id);
+                    if (dayDay.diffNow().milliseconds > 0) {
+                        o.option('Днем (12:00)', () => {
+                            info.value.dateTime = dayDay
+                            e.goto('ENTER CAPTION')
+                        })
+                    }
+                    if (evening.diffNow().milliseconds > 0) {
+                        o.option('Вечером (18:00)', () => {
+                            info.value.dateTime = evening
+                            e.goto('ENTER CAPTION')
+                        })
+                    }
+                    if (beforeBad.diffNow().milliseconds > 0) {
+                        o.option('На сон грядущий (23:00)', () => {
+                            info.value.dateTime = beforeBad
+                            e.goto('ENTER CAPTION')
+                        })
+                    }
+
+                    o.option('Напишу время', () => {
+                        e.got.editMessageText('Напечатайте время в формате HH:mm')
+                        e.next('ENTER TIME')
+                    })
+                })
+            })
+            lines.line('SELECT TIME', e => {
+                e.tg.select('Выберите время', o => {
+                    o.option('Утром (08:00)', () => {
+                        info.value.dateTime = info.value.dateTime.plus({
+                            hours: 8
+                        })
+                        e.goto('ENTER CAPTION')
+                    })
+                    o.option('Днем (12:00)', () => {
+                        info.value.dateTime = info.value.dateTime.plus({
+                            hours: 12
+                        })
+                        e.goto('ENTER CAPTION')
+                    })
+                    o.option('Вечером (18:00)', () => {
+                        info.value.dateTime = info.value.dateTime.plus({
+                            hours: 18
+                        })
+                        e.goto('ENTER CAPTION')
+                    })
+                    o.option('На сон грядущий (23:00)', () => {
+                        info.value.dateTime = info.value.dateTime.plus({
+                            hours: 23
+                        })
+                        e.goto('ENTER CAPTION')
+                    })
+                    o.option('Напишу время', () => {
+                        e.got.editMessageText('Напечатайте время в формате HH:mm')
+                        e.next('ENTER TIME')
+                    })
+                })                
+            })
+            lines.line('ENTER TIME', e => {
+                if (!e.got.has(message('text'))) {
+                    e.got.reply('Время не распознано, введите другое время')
+                    e.next('ENTER TIME')
+                    return
+                }
+                const parsed = DateTime.fromFormat(e.got.message.text, 'HH:mm')
+                if (!parsed.isValid) {
+                    e.got.reply('Время не распознано, введите другое время')
+                    e.next('ENTER TIME')
+                    return
+                }
+                info.value.dateTime = info.value.dateTime.plus({ 
+                    hours: parsed.hour,
+                    minutes: parsed.minute
+                })
+                if (info.value.dateTime.diffNow().milliseconds < 0) {
+                    e.got.reply('Мы не можем Вам напомнить в прошлом :( Попробуйте еще раз')
+                    e.next('ENTER TIME')
+                    return
+                }
+                e.goto('ENTER CAPTION')
+            })
+            lines.line('ENTER CAPTION', e => {
+                e.got.reply('Отправьте контент напоминания')
+                e.suspend(() => {
+                    if (!e.got.has(message())) {
+                        e.goto('ENTER CAPTION')
+                        return
+                    }
+                    
+                    info.value.caption = e.got.message.message_id
+                    e.goto('CONFIRMATION')
+                })
+            })
+            lines.line('CONFIRMATION', e => {
+                if (info.value.caption === null) {
+                    console.warn('NO CAPTION!', e.got.from?.id)
+                    return
+                }
+                const chatId = e.got.chat?.id
+                const userId = e.got.from?.id
+                if (!userId || !chatId) {
+                    console.warn('NO ID!', e.got.from?.id)
+                    return
+                }
+                const message = `Создано новое напоминание на ${info.value.dateTime.toFormat('LLLL dd yyyy HH:mm:ss')}`
+                if (e.got.callbackQuery) {
+                    e.got.editMessageText(message)
+                } else {
+                    e.got.reply(message)
+                }
+
+                const delay = info.value.dateTime.diffNow().milliseconds 
+                const messageId = info.value.caption
+
+                scheduler.do(scheduler.gen(), delay, () => {
+                    bot.telegram.sendMessage(userId, 'Напоминание!')
+                    bot.telegram.forwardMessage(userId, userId, messageId)
+                })
+            })
+        })
+    )
+
+    function enter(title:string) {
+        return (ctx:Context) => {
+            if (ctx.has(message('text'))) {
+                start(title, ctx.from.id, justCtx(ctx))
             }
         }
-        if (mode == DIALOG_STATES[1]) {
-            await ctx.answerCbQuery();
-            const payload = ctx.callbackQuery.data
+    }
 
-            if (payload === 'seconds_30') {
-                ctx.reply("Введите сообщение");
-                dialogState.set(ctx.from.id, {
-                    mode: DIALOG_STATES[2],
-                    time: 1000 * 5
-                });
-            }
+    /* ------- ENTRY POINT -------- */
+    bot.command('start', enter('START'))
+    bot.command('new', enter('START'))
+
+    const CANCELLATION_WORDS = new Set([
+        'ОТМЕНА',
+        'CANCEL'
+    ])
+    /* ---------- ENGINE ---------- */
+    bot.on(message('text'), ctx => {
+        if (CANCELLATION_WORDS.has(ctx.message.text.toUpperCase())) {
+            destroy(ctx.from.id)
+            ctx.reply('Создание напоминания отменено')
+            return
         }
-    });
+        use(ctx.from.id, justCtx(ctx))
+    })
+    bot.on(callbackQuery('data'), ctx => {
+        ctx.answerCbQuery()
+        use(ctx.from.id, {
+            payload: ctx.callbackQuery.data,
+            ctx
+        })
+    })
 
-    bot.on(message('text'), async (ctx) => {
-
-        if (!dialogState.has(ctx.from.id)) {
-            return;
-        }
-
-        const item = dialogState.get(ctx.from.id)!;
-
-        if (item.mode === DIALOG_STATES[2]) {
-            const message = ctx.message.text;
-            const time = item.time;
-            
-            ctx.reply("Поставлено на счетчик")
-            setTimeout(() => {
-                ctx.reply(message);
-            }, time);
-        }
-    });
-
+    /* ---------- LAUNCH ---------- */
+    scheduler.repeat('KEEP ALIVE', 10 * 60 * 1000,  () => {})
+    scheduler.start()
     bot.launch(() => console.log("ONLINE!"));
 
-    process.once('SIGINT', () => bot.stop('SIGINT'))
-    process.once('SIGTERM', () => bot.stop('SIGTERM'))
+    /* --------- SHUTDOWN --------- */
+    process.once('SIGINT', () => {
+        scheduler.stop()
+        bot.stop('SIGINT')
+        console.log()
+    })
+    process.once('SIGTERM', () => {
+        scheduler.stop()
+        bot.stop('SIGTERM')
+        console.log()
+    })
 }
 
 main();

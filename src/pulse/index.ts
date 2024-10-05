@@ -135,6 +135,10 @@ class Pulse {
         return this;
     }
 
+    gen() {
+        return `${Date.now()}${Math.round(Math.random() * 10000)}${this.jobs.size}`
+    }
+
     do(name:string, after:number, f:Function) {
         this.jobs.set(name, [after, false, f]);
         if (this.running) {
