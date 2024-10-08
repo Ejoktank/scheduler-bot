@@ -1,5 +1,23 @@
 {
+  "name": "scheduler-bot",
+  "version": "0.2.3",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "cp .env.empty.json src/.env.json && npx tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^22.5.5",
+    "typescript": "^5.6.2"
+  },
   "dependencies": {
-    "node-telegram-bot-api": "^0.66.0"
+    "luxon": "^3.5.0",
+    "telegraf": "^4.16.3"
   }
 }
