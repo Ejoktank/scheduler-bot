@@ -76,7 +76,7 @@ class OptionsDescriber {
 
 type DialogCallback = () => void
 
-interface DialogContext<T> {
+interface DialogContextIndependent {
     suspend: (f:DialogCallback) => void
 
     goto: (id:string) => void
@@ -84,8 +84,15 @@ interface DialogContext<T> {
     continue: (id:string) => () => void
     
     choose: (f:(x:OptionsDescriber) => void) => void
-    got: T 
 }
+
+interface DialogContextLinked<T> {
+    got: T
+}
+
+interface DialogContext<T> 
+    extends DialogContextIndependent, DialogContextLinked<T> {}
+
 interface DialogEnvironment<T> {
     original: T
     sessionWillContinue: boolean
@@ -230,7 +237,7 @@ class DialogDescriber<T, Patch> {
         }
         
         const begin = (title:string, id:DialogUnique, ctx:DialogInput<T>) => {
-            let context: DialogContext<T> = {
+            const context: DialogContext<T> = {
                 suspend(action) {
                     if (!continuations.has(id)) {
                         continuations.set(id, { 
@@ -260,11 +267,10 @@ class DialogDescriber<T, Patch> {
                     return environment.get(id)!.original
                 }
             }
-
-            context = Object.assign(context, this.plugin(context))
+            const patchedContext = Object.assign(context, this.plugin(context))
             
             continuations.set(id, {
-                thens: [() => context.goto(title)],
+                thens: [() => patchedContext.goto(title)],
                 refs: []
             })
             routine(id, ctx)

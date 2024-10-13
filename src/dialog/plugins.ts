@@ -18,7 +18,7 @@ interface TelegrafContextPatch {
     }
 }
 
-export const telegraf: DialogPlugin<Context, TelegrafContextPatch> = (ctx) => ({
+export const telegraf = <T>(transform: (x:T) => Context): DialogPlugin<T, TelegrafContextPatch> => (ctx) => ({
     tg: {
         select: (text:string, op:(ch:TelegrafChooser) => void) => {
             const storage: [string, string, () => void][] = []
@@ -34,10 +34,11 @@ export const telegraf: DialogPlugin<Context, TelegrafContextPatch> = (ctx) => ({
                     inline_keyboard: storage.map(([text, callback_data]) => [{ text, callback_data }])
                 }
             }
-            if (ctx.got.callbackQuery) {
-                ctx.got.editMessageText(text, buttons)
+            const tgContext = transform(ctx.got)
+            if (tgContext.callbackQuery) {
+                tgContext.editMessageText(text, buttons)
             } else {
-                ctx.got.reply(text, buttons)
+                tgContext.reply(text, buttons)
             }
         }
     }

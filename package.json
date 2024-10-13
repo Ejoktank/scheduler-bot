@@ -5,18 +5,22 @@
   "main": "dist/main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "cp .env.empty.json src/.env.json && npx tsc"
+    "build": "cp -n .env.empty.json src/.env.json && npx tsc"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
     "@types/luxon": "^3.4.2",
     "@types/node": "^22.5.5",
+    "drizzle-kit": "^0.25.0",
     "typescript": "^5.6.2"
   },
   "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "drizzle-orm": "^0.34.1",
     "luxon": "^3.5.0",
     "telegraf": "^4.16.3"
   }
